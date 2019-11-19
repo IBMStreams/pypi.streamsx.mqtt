@@ -4,12 +4,12 @@
 
 import streamsx.spl.op
 import streamsx.spl.types
-from streamsx.topology.schema import CommonSchema, StreamSchema
-from streamsx.spl.types import rstring
 
 """
-    Configuration properties apply to mqtt_source and mqtt_sink and
-    subscribe unless stated otherwise.
+    Configuration properties apply to mqtt_source() and mqtt_sink() 
+    unless stated otherwise.
+    These properties have to be provided in a Python [dict] to the two
+    functions.
 
     appConfigName
         This parameter specifies the name of application configuration that
@@ -103,7 +103,7 @@ from streamsx.spl.types import rstring
     sslProtocol
         This optional parameter of type rstring specifies the ssl protocol to 
         use for making SSL connections. If this parameter is not specified, 
-        the default protocol TLSv1.2 will be used. 
+        the default protocol 'TLSv1.2' will be used. 
 
     trustStore
         Optional String. The pathname to a file containing the
@@ -138,19 +138,42 @@ def mqtt_sink(stream,
 Creates a MQTT client for sending data to a MQTT server.
 
 Parameter: 
-    stream: stream of tuples which should be processed
-    config: general MQTT connection configuration
-    topic:  topic to which all tuples data of the stream should be sent (mutual exclusive with next parameter)
-    topic_attribute_name: attribute in each tuple which defines the topic the tuple data should be sent to
-    data_attribute_name: name of the tuple attribute containing the data which should be sent, if not specified: a one attribute tuple will send this attribute, when multiple attributes are in the tuple a 'data' attribute will be used
-    name: optional name of the operator
+    stream
+           mandatory
+           stream of tuples which should be processed
+    config
+           mandatory
+           general MQTT connection configuration
+    topic
+           mandatory but (mutual exclusive with 'topic_attribute_name')
+           topic to which all tuples data of the stream 
+           should be sent 
+    topic_attribute_name
+           mandatory but (mutual exclusive with 'topic')
+           attribute in each tuple which defines the topic 
+           the tuple data should be sent to
+    data_attribute_name
+          optional
+          name of the tuple attribute containing the data which
+          should be sent, if not specified: a one attribute tuple
+          will send this attribute, when multiple attributes are 
+          in the tuple a 'data' attribute will be used
+    name  
+          optional 
+          name of the operator (used in visualization and logging)
     
 Returns:
     None
 
 
 Hints:
-    Not the whole tuple but only one attribute defined as the data to be sent. So the input stream has to contain at least this one attribute. But it can have multiple attributes which are ignored. In case parameter 'topic_attribute_name' is used this attribute defines the topic the tuples data should be sent to. This attribute has to be of a string type. As the underlying operator is requires a structured tuple. The input stream schema has to be structured.
+    Not the whole tuple but only one attribute (defined as the data to be sent). 
+    So the input stream has to contain at least this one attribute. But it can 
+    have multiple attributes which are ignored. In case parameter 
+    'topic_attribute_name' is used this attribute defines the topic the tuples 
+    data should be sent to. This attribute has to be of a string type. As the 
+    underlying operator is requires a structured tuple. The input stream schema
+    has to be structured.
 
 Example:
     class MqttDataTuple(typing.NamedTuple):
@@ -160,16 +183,21 @@ Example:
 
     topo = Topology(name)
     mqtt_config = {}
-    mqtt_config['userID'] = 'xxxx'
+    mqtt_config[serverURI]  = 'ssl://my.mqtt.broker'
+    mqtt_config['userID']   = 'xxxx'
     mqtt_config['password'] = 'xxxx'
  
       ...
-    #in this scenario your stream need to be a structured schema type
+    # in this scenario your stream need to be a structured schema type
     # with attribute 'data' containing the data to be sent
+    # e.g. the above type 'MqttDataTuple'
+    
+    # create some streaming content
     sink_stream = create_your_stream(topo)    
 
     # send content of attribute 'data' (default) to topic 'test_topic' 
     # to the mqtt_broker configured in mqtt_config
+    # additional attributes in the tuples will be ignored 
     mqtt.mqtt_sink(sink_stream,mqtt_config,topic='test_topic')
 
     # subscribe to topic 'test_topic' on the mqtt_broker configured
@@ -206,6 +234,75 @@ def mqtt_source(topology,                            # mandatory, topology the s
               data_attribute_name = None,            # default: only 1 attribute in schema?it's name:look for 'data' attribute
               name = None               
               ):
+    """
+Creates a MQTT client for receiving data (topology source) by subscribing to topics
+on a MQTT server.
+
+Parameter: 
+    topology
+           mandatory
+           the topology this data source is added to
+    schema 
+           mandatory
+           a schema definition for the type of the stream providing
+           the received data
+    config
+           mandatory 
+           general MQTT connection configuration
+    topics
+           mandatory
+           list of topics this MQTT client is subscribing to 
+    topic_attribute_name
+           optional
+           attribute in the schema which will contain the topic the
+           tuple data was received from
+    data_attribute_name
+          optional
+          name of the tuple attribute containing the data 
+          if not specified: if the schema contains only one attribute
+          this one will contain the data, when multiple attributes are 
+          in the schema a 'data' attribute will be used
+    name  
+          optional 
+          name of the operator (used in visualization and logging)
+    
+Returns:
+    Stream (of type 'schema') of received data
+
+
+Example:
+    class MqttDataTuple(typing.NamedTuple):
+        topic_name: str
+        data:       str
+
+
+    topo = Topology(name)
+    mqtt_config = {}
+    mqtt_config[serverURI]  = 'ssl://my.mqtt.broker'
+    mqtt_config['userID']   = 'xxxx'
+    mqtt_config['password'] = 'xxxx'
+ 
+      ...
+    # in this scenario your stream need to be a structured schema type
+    # with attribute 'data' containing the data to be sent
+    # e.g. the above type 'MqttDataTuple'
+    
+    # create some streaming content
+    sink_stream = create_your_stream(topo)    
+
+    # send content of attribute 'data' (default) to topic 'test_topic' 
+    # to the mqtt_broker configured in mqtt_config
+    # additional attributes in the tuples will be ignored 
+    mqtt.mqtt_sink(sink_stream,mqtt_config,topic='test_topic')
+
+    # subscribe to topic 'test_topic' on the mqtt_broker configured
+    # in mqtt_config
+    # generate a stream with schema of class MqttDataTuple
+    # message data is written to (default) 'data' attribute, the topic 
+    # the message was received from is written to attribute 'topic_name'
+    source_stream = mqtt.mqtt_source(topo, [MqttDataTuple], mqtt_config, 'test_topic', topic_attribute_name = 'topic_name')
+    """
+
 
     params = config.copy()
     # retain is for MQTT msg publish only

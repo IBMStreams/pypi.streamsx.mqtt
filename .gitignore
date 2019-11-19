@@ -1,3 +1,6 @@
+# local configuration files containing credentials to run tests
+*Config.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
