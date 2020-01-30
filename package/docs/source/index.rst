@@ -10,7 +10,7 @@ running on IBM Cloud see:
 
   * `streamsx package documentation <https://streamsxtopology.readthedocs.io/en/stable>`_
 
-This package exposes SPL operators in the `com.ibm.streams.mqtt` toolkit as Python methods.
+This package exposes the `com.ibm.streamsx.mqtt` toolkit for use with Python.
 
 .. automodule:: streamsx.mqtt
 
