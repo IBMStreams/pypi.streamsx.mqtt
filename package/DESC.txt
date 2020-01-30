@@ -2,6 +2,7 @@ Overview
 ========
 
 Provides function:
+
 * to connect to an MQTT server
 * to subscribe to topics and receive events
 * to send events
