@@ -1,6 +1,6 @@
 # coding=utf-8
 # Licensed Materials - Property of IBM
-# Copyright IBM Corp. 2019
+# Copyright IBM Corp. 2020
 
 import streamsx.spl.op
 import streamsx.spl.types
@@ -8,7 +8,6 @@ from streamsx.topology.composite import Source as AbstractSource
 from streamsx.topology.composite import ForEach as AbstractSink
 from streamsx.topology.schema import CommonSchema
 from streamsx.toolkits import create_keystore, create_truststore, extend_keystore, extend_truststore
-from streamsx.kafka._kafka import _generate_random_digits
 from tempfile import gettempdir
 import string
 import random
