@@ -1,0 +1,8 @@
+{
+  "clientID":    "d:<orgId>:<device-type>:<device-name>",
+  "password":    "<token>",
+  "userID":      "use-token-auth",
+  "serverURI":   "ssl://<orgId>.messaging.internetofthings.ibmcloud.com",
+  "vmArg":        "-Dcom.ibm.jsse2.overrideDefaultTLS=true"
+}
+
