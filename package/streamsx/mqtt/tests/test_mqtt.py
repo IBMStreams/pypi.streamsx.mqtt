@@ -1,9 +1,11 @@
-import streamsx.mqtt as mqtt
+from streamsx.mqtt import MQTTSource, MQTTSink
 
 import typing
 from streamsx.topology.topology import Topology
+from streamsx.topology.context import ContextTypes
 from streamsx.topology.tester import Tester
 from streamsx.topology.schema import CommonSchema, StreamSchema
+from streamsx.mqtt.tests.x509_certs import TRUSTED_CERT_PEM, PRIVATE_KEY_PEM, CLIENT_CERT_PEM, CLIENT_CA_CERT_PEM
 import streamsx.spl.op as op
 import streamsx.spl.toolkit
 import streamsx.rest as sr
@@ -25,7 +27,7 @@ def cloud_creds_env_var():
 
 class MqttDataTuple(typing.NamedTuple):
     topic_name: str
-    data:       str
+    data: str
 
 
 class Test(unittest.TestCase):
@@ -36,10 +38,10 @@ class Test(unittest.TestCase):
         self.mqtt_toolkit_home = os.environ["MQTT_TOOLKIT_HOME"]
         
     def _build_only(self, name, topo):
-        result = streamsx.topology.context.submit("TOOLKIT", topo.graph) # creates tk* directory
+        result = streamsx.topology.context.submit(ContextTypes.TOOLKIT, topo.graph) # creates tk* directory
         print(name + ' (TOOLKIT):' + str(result))
         assert(result.return_code == 0)
-        result = streamsx.topology.context.submit("BUNDLE", topo.graph)  # creates sab file
+        result = streamsx.topology.context.submit(ContextTypes.BUNDLE, topo.graph)  # creates sab file
         print(name + ' (BUNDLE):' + str(result))
         assert(result.return_code == 0)
 
@@ -63,44 +65,108 @@ class Test(unittest.TestCase):
 
     def test_bad_param(self):
         print ('\n---------'+str(self))
-        name = 'test_bad_param'
-        topo = Topology(name)
-        config = {}
-        # mqtt_source : expect ValueError, no Topic (parameter is None)
-        self.assertRaises(ValueError, mqtt.mqtt_source, topo,MqttDataTuple,{},None,topic_attribute_name = 'topic_name' )
-        # mqtt_sink : expect ValueError, topic and topic_attribute_name is set
-        test_stream = self._create_stream(topo)
-        self.assertRaises(ValueError, mqtt.mqtt_sink,test_stream,{},topic='test_topic',topic_attribute_name='topic_name')
-        # mqtt_sink : expect ValueError, topic and topic_attribute_name are both not set
-        self.assertRaises(ValueError, mqtt.mqtt_sink,test_stream,{})
-        # expect ValueError 
-        # self.assertRaises(TypeError, mqtt.mqtt_source, topo, )
+        # constructor tests
+        self.assertRaises(ValueError, MQTTSource, server_uri=None, topics='topic1', schema=MqttDataTuple)
+        # topics = None
+        self.assertRaises(ValueError, MQTTSource, server_uri='tcp://server:1234', topics=None, schema=MqttDataTuple)
+        # schema = None
+        self.assertRaises(ValueError, MQTTSource, server_uri='tcp://server:1234', topics='topic1', schema=None)
+        # server_uri = None
+        self.assertRaises(ValueError, MQTTSink, server_uri=None, topic='topic1')
+        # topic and topic_attribute_name = None
+        self.assertRaises(ValueError, MQTTSink, server_uri='tcp://server:1234', topic=None, topic_attribute_name=None)
+        # topic and topic_attribute_name = Not None
+        self.assertRaises(ValueError, MQTTSink, server_uri='tcp://server:1234', topic='topic1', topic_attribute_name='topic')
+   
+        # setter tests
+        src = MQTTSource(server_uri='tcp://server:1833', topics=['topic1', 'topic2'], schema=MqttDataTuple)
+        with self.assertRaises(TypeError):
+            src.qos = ['0', '2']
+        with self.assertRaises(ValueError):
+            src.qos = 3
+        with self.assertRaises(ValueError):
+            src.qos = -1
+        with self.assertRaises(ValueError):
+            src.qos = [0, 3]
+        with self.assertRaises(ValueError):
+            src.reconnection_bound = -2
+        with self.assertRaises(ValueError):
+            src.keep_alive_seconds = -1
+        with self.assertRaises(ValueError):
+            src.command_timeout_millis = -1
+        with self.assertRaises(ValueError):
+            src.message_queue_size = 0
+            
+        sink = MQTTSink(server_uri='tcp://server:1833', topic='topic1')
+        with self.assertRaises(ValueError):
+            sink.qos = 3
+        with self.assertRaises(ValueError):
+            sink.qos = -1
+        with self.assertRaises(TypeError):
+            sink.qos = [0, 3]
+        with self.assertRaises(ValueError):
+            sink.reconnection_bound = -2
+        with self.assertRaises(ValueError):
+            sink.keep_alive_seconds = -1
+        with self.assertRaises(ValueError):
+            sink.command_timeout_millis = -1
+        
 
-    def test_mqqt_source(self):
+    def test_compile_MQTTSource(self):
         print ('\n---------'+str(self))
-        name = 'test_mqtt_source'
+        name = 'test_MQTTSource'
         topo = Topology(name)
         streamsx.spl.toolkit.add_toolkit(topo, self.mqtt_toolkit_home)
-        mqtt_config = self._get_app_config()
-        source_stream = mqtt.mqtt_source(topo, [MqttDataTuple], mqtt_config, 'test_topic', topic_attribute_name = 'topic_name')
+        src = MQTTSource(server_uri='tcp://server:1833', topics=['topic1', 'topic2'], schema=[MqttDataTuple])
+        # simply add all parameters; let' see if it compiles
+        src.qos = [1, 2]
+        src.message_queue_size = 122
+        src.client_id = "client-IDsrc"
+        src.reconnection_bound = 25
+        src.trusted_certs = [TRUSTED_CERT_PEM, CLIENT_CA_CERT_PEM]
+        src.client_cert = CLIENT_CERT_PEM
+        src.client_private_key = PRIVATE_KEY_PEM
+        src.ssl_protocol = 'TLSv1.1'
+        src.vm_arg = ["-Xmx13G"]
+        src.ssl_debug = True
+        src.app_config_name = "abbconf2"
+        src.command_timeout_millis=30000
+        src.keep_alive_seconds = 65
+        src.password = "passw0rd2"
+        src.username = "it_is_me"
+        src.app_config_name = "mqtt_app_cfg"
+        
+        source_stream = topo.source(src, name='MqttStream')
         source_stream.print()
         # build only
         self._build_only(name, topo)
 
 
-    def test_mqqt_sink(self):
+    def test_compile_MQTTSink(self):
         print ('\n---------'+str(self))
-        name = 'test_mqtt_sink'
+        name = 'test_MQTTSink'
         topo = Topology(name)
         streamsx.spl.toolkit.add_toolkit(topo, self.mqtt_toolkit_home)
-        mqtt_config = self._get_app_config()
         test_stream = self._create_stream(topo)
-        test_stream.print()
-        mqtt.mqtt_sink(test_stream,mqtt_config,topic='test_topic')
+        sink = MQTTSink(server_uri='tcp://server:1833', topic='topic1', data_attribute_name='data')
+        # simply add all parameters; let' see if it compiles
+        sink.reconnection_bound=5
+        sink.qos=2
+        sink.trusted_certs = [TRUSTED_CERT_PEM, CLIENT_CA_CERT_PEM]
+        sink.client_cert = CLIENT_CERT_PEM
+        sink.client_private_key = PRIVATE_KEY_PEM
+        sink.ssl_protocol = 'TLSv1.2'
+        sink.vm_arg = ["-Xmx1G"]
+        sink.ssl_debug = True
+        sink.app_config_name = "abbconf"
+        sink.client_id = "client-IDsink"
+        sink.command_timeout_millis=47
+        sink.keep_alive_seconds = 3
+        sink.password = "passw0rd"
+        sink.username = "rolef"
+        sink.retain = True
 
-        source_stream = mqtt.mqtt_source(topo, [MqttDataTuple], mqtt_config, 'test_topic', topic_attribute_name = 'topic_name')
-        source_stream.print()
-
+        test_stream.for_each(sink, name='MQTTPublish')
         # build only
         self._build_only(name, topo)
 
@@ -129,9 +195,13 @@ class Test(unittest.TestCase):
         app_subscribe_topic = "iot-2/type/"+device_type+"/id/"+device_id+"/evt/"+event_id+"/fmt/"+message_format
         #mqtt config is dict as read by from JSON, JSON uses already correct parameter values
         app_config = self._get_app_config()
-        source_stream = mqtt.mqtt_source(topo, [MqttDataTuple], app_config, app_subscribe_topic, topic_attribute_name = 'topic_name')
+        mqtt_source = MQTTSource(server_uri=app_config['serverURI'], topics=app_subscribe_topic, schema=[MqttDataTuple], topic_attribute_name='topic_name')
+        mqtt_source.username = app_config['userID']
+        mqtt_source.password = app_config['password']
+        mqtt_source.client_id = app_config['clientID']
+        mqtt_source.vm_arg = "-Dcom.ibm.jsse2.overrideDefaultTLS=true"
+        source_stream = topo.source(mqtt_source, name='MqttSubscribe')
         source_stream.print()
-
 
         test_stream = self._create_stream(topo)
         test_stream.print()
@@ -142,15 +212,19 @@ class Test(unittest.TestCase):
         device_topic = "iot-2/evt/"+event_id+"/fmt/" + message_format
         # device config is dict as read by from JSON, JSON uses already correct parameter values
         device_config = self._get_device_config()
-        mqtt.mqtt_sink(test_stream,device_config,topic=device_topic)
+        mqtt_sink = MQTTSink(server_uri=device_config['serverURI'], topic=device_topic, data_attribute_name='data')
+        mqtt_sink.client_id = device_config['clientID']
+        mqtt_sink.username = device_config['userID']
+        mqtt_sink.password = device_config['password']
+        mqtt_sink.vm_arg = "-Dcom.ibm.jsse2.overrideDefaultTLS=true"
+
+        test_stream.for_each(mqtt_sink, name='MqttPublish')
 
         if (("TestDistributed" in str(self)) or ("TestStreamingAnalytics" in str(self))):
             self._launch(topo)
         else:
             # build only
             self._build_only(name, topo)
-
-
 
 
 class TestDistributed(Test):
@@ -167,6 +241,7 @@ class TestDistributed(Test):
         print(str(rc))
         if rc is not None:
             if (rc.return_code == 0):
+                pass
                 rc.job.cancel()
 
 class TestStreamingAnalytics(Test):

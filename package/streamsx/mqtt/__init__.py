@@ -1,47 +1,48 @@
 # coding=utf-8
 # Licensed Materials - Property of IBM
-# Copyright IBM Corp. 2019
+# Copyright IBM Corp. 2020
 
 """
 Overview
 ++++++++
 
 Provides functions:
+
 * to connect to an MQTT server
 * to subscribe to topics and receive events
-* to send events
-
+* to publish events
 
 
 Sample
 ++++++
 
-A simple example of a Streams application uses the :py:func:`model_feed` and :py:func:`score` functions::
+A simple example of a Streams application uses the :py:class:`~MQTTSink` and :py:class:`~MQTTSource` classes::
 
-    from streamsx.topology.topology import *
-    from streamsx.topology.schema import CommonSchema, StreamSchema
-    from streamsx.topology.context import submit
-    import streamsx.pmml as pmml
-
-    topo = Topology()
-    # IBM Cloud Machine Learning service credentials
-    credentials = '{"url" : "xxx", "instance_id" : "icp"}'
-    models = pmml.model_feed(topo, connection_configuration=credentials, model_name="sample_pmml", polling_period=datetime.timedelta(minutes=5))
-    # sample with a single model predictor field
-    s = topo.source(['first tuple', 'second tuple']).as_string()
-    out_schema = StreamSchema('tuple<rstring string, rstring result>')
-    res = pmml.score(s, schema=out_schema, model_input_attribute_mapping='sample_predictor=string', model_stream=models, raw_result_attribute_name='result', initial_model_provisioning_timeout=datetime.timedelta(minutes=1))
-    res.print()
-    # Use for IBM Streams including IBM Cloud Pak for Data
-    submit ('DISTRIBUTED', topo)
-    # Use for IBM Streaming Analytics service in IBM Cloud
-    #submit('STREAMING_ANALYTICS_SERVICE', topo)
+    from streamsx.mqtt import MQTTSource, MQTTSink
+    from streamsx.topology import context
+    from streamsx.topology.topology import Topology
+    from streamsx.topology.schema import CommonSchema
+    
+    mqtt_server_uri = 'tcp://host.domain:1883'
+    s='Each character will be an MQTT message'
+    topology = Topology()
+    data = topology.source([c for c in s]).as_string()
+    # publish to MQTT
+    data.for_each(MQTTSink(server_uri=mqtt_server_uri, topic='topic'),
+                  name='MQTTpublish')
+    
+    # subscribe for data and print to stdout
+    received = topology.source(MQTTSource(mqtt_server_uri, schema=CommonSchema.String, topics='topic'))
+    received.print()
+    
+    context.submit(context.ContextTypes.DISTRIBUTED, topology)
+    # the Streams Job keeps running and must be cancelled manually
 
 """
 
 
-__version__='1.0.0'
+__version__='0.1.0'
 
-__all__ = ['mqtt_sink', 'mqtt_source']
-from streamsx.mqtt._mqtt import mqtt_sink, mqtt_source
+__all__ = ['MQTTSink', 'MQTTSource']
+from streamsx.mqtt._mqtt import MQTTSink, MQTTSource
 

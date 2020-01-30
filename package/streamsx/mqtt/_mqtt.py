@@ -4,340 +4,705 @@
 
 import streamsx.spl.op
 import streamsx.spl.types
+from streamsx.topology.composite import Source as AbstractSource
+from streamsx.topology.composite import ForEach as AbstractSink
+from streamsx.topology.schema import CommonSchema
+from streamsx.toolkits import create_keystore, create_truststore, extend_keystore, extend_truststore
+from streamsx.kafka._kafka import _generate_random_digits
+from tempfile import gettempdir
+import string
+import random
+import os
 
-"""
-    Configuration properties apply to mqtt_source() and mqtt_sink() 
-    unless stated otherwise.
-    These properties have to be provided in a Python [dict] to the two
-    functions.
+_TOOLKIT_NAME = 'com.ibm.streamsx.mqtt'
 
-    appConfigName
-        This parameter specifies the name of application configuration that
-        stores client credential information, the credential specified via 
-        application configruation overrides the one specified with userID and 
-        password parameters. 
+def _generate_random_digits(len=10):
+    """
+    Generate a string of random digits, default lengh is 10
+    """
+    return ''.join(random.choice(string.digits) for _ in range(len))
 
-  
-    clientID
-        Optional String. A unique identifier for a connection
-        to the MQTT server.
-        he MQTT broker only allows a single
-        onnection for a particular  clientID.
-        By default a unique client ID is automatically
-        generated for each use of  publish() and subscribe().
-        The specified clientID is used for the first
-        publish() or subscribe() use and
-        suffix is added for each subsequent uses.
+
+class MQTTComposite(object):
+    _APP_CONFIG_PROP_NAME_FOR_PASSWORD = 'password'
+    _APP_CONFIG_PROP_NAME_FOR_USERNAME = 'username'
+
+    def __init__(self):
+        self._vm_arg = None
+        self._app_config_name = None
+        self._username = None
+        self._password = None
+        self._trusted_certs = None
+        self._truststore = None
+        self._truststore_password = None
+        self._client_cert = None
+        self._client_private_key = None
+        self._keystore = None
+        self._keystore_password = None
+        self._ssl_protocol = None
+        self._server_uri = None
+        self._reconnection_bound = -1
+        self._keep_alive_seconds = 60
+        self._command_timeout_millis = None
+        self._client_id = None
+        self._ssl_debug = False
+
+    @property
+    def ssl_debug(self):
+        """
+        bool: When ``True`` the property enables verbose SSL debug output at runtime.
+        """
+        return self._ssl_debug
     
-    commandTimeout
-        Optional Long. The maximum time in milliseconds
-        to wait for a MQTT connect or publish action to complete.
-        A value of 0 causes the client to wait indefinitely.
-        The default is 0.
-    
-    keepAliveInterval
-        Optional Integer.  Automatically generate a MQTT
-        ping message to the server if a message or ping hasn't been
-        sent or received in the last keelAliveInterval seconds.  
-        Enables the client to detect if the server is no longer available
-        without having to wait for the TCP/IP timeout.  
-        A value of 0 disables keepalive processing.
-        The default is 60.
-    
-    keyStore
-        Optional String. The pathname to a file containing the
-        MQTT client's public private key certificates.
-        If a relative path is specified, the path is relative to the
-        application directory. 
-        Required when an MQTT server is configured to use SSL client authentication.
-    
-    keyStorePassword
-        Required String when keyStore is used.
-        The password needed to access the encrypted keyStore file.
+    @ssl_debug.setter
+    def ssl_debug(self, ssl_debug:bool):
+        self._ssl_debug = ssl_debug
 
-    messageQueueSize
-        [mqtt_source] Optional Integer. The size, in number
-        of messages, of the subscriber's internal receive buffer.  Received
-        messages are added to the buffer prior to being converted to a
-        stream tuple. The receiver blocks when the buffer is full.
-        The default is 50.
+    @property
+    def vm_arg(self):
+        """
+        str|list: Arguments for the Java Virtual Machine used at Runtime, for example ``-Xmx2G``.
+             For multiple arguments, use a list::
+             
+                 mqtt.vm_arg = ["-Xmx2G", "-Xms1G"]
+        """
+        return self._vm_arg
 
-    password
-        Optional String.  The identifier to use when authenticating
-        with server configured to require that form of authentication. 
+    @vm_arg.setter
+    def vm_arg(self, vm_arg):
+        if vm_arg:
+            self._vm_arg = vm_arg
 
-    passwordPropertyName
-        This parameter specifies the property name of password in the application
-        configuration. If the appConfigName parameter is specified and the 
-        passwordPropName parameter is not set, a compile time error occurs.    
-    
-    period
-        Optional Long. The time in milliseconds before
-        attempting to reconnect to the server following a connection failure.
-        The default is 60000.
-    
-    qos
-        Optional Integer. The default
-        MQTT quality of service used for message handling.
-        The default is 0.
+    @property
+    def app_config_name(self):
+        """
+        str: The name of an application configuration with username and password for login to the MQTT server.
+        The application configuration must contain the properties
+        ``username`` and ``password`` and exist when the topology is submitted. Username and password given in
+        an application configuration override :py:attr:`password` and :py:attr:`username`.
+        """
+        return self._app_config_name
 
-    qosAttributeName
-        Attribute name that contains the qos to publish the message with. 
-        This parameter is mutually exclusive with the "qos" parameter. 
+    @app_config_name.setter
+    def app_config_name(self, app_config_name: str):
+        self._app_config_name = app_config_name
 
-    reconnectionBound
-        This optional parameter of type int32 specifies the number 
-        of successive connections that are attempted for an operator. 
-        Specify 0 for no retry, n for n number of retries, -1 for inifinite retry.
+    @property
+    def username(self):
+        """
+        str: The username for login to the MQTT server. This property is overridden by the username given in an application configuration.
+        """
+        return self._username
 
-    retain
-        [mqtt_sink] Optional Boolean. Indicates if messages should be
-        retained on the MQTT server.  Default is false.
-    
-    serverURI
-        Required String. URI to the MQTT server, either
-        tcp://<hostid>[:<port>]}
-        or ssl://<hostid>[:<port>]}.
+    @username.setter
+    def username(self, username: str):
+        self._username = username
+
+    @property
+    def password(self):
+        """
+        str: The password for login to the MQTT server. This property is overridden by the password given in an application configuration.
+        """
+        return self._password
+
+    @password.setter
+    def password(self, password: str):
+        self._password = password
+
+    @property
+    def trusted_certs(self):
+        """
+        str|list: Certificates or filenames with certificates in PEM format that shall be trusted when SSL connections are made.
+        Self-signed server certificates or the root certificate of server certificates must go in here.
+        When no truststore is given with :py:attr:`truststore`, a new truststore is created and added as a file dependency
+        to the topology. Otherwise the certificates are added to the given truststore, and the truststore is added as
+        a file dependency.
+        
+        Example with one certificate literally::
+        
+            mqtt_comp = ...
+            mqtt_comp.trusted_certs = \"\"\"
+            -----BEGIN CERTIFICATE-----
+            MIIDJzCCAg+gAwIBAgIJAJhu1pO2qbj7MA0GCSqGSIb3DQEBCwUAMCoxEzARBgNV
+            BAoMCmlvLnN0cmltemkxEzARBgNVBAMMCmNsdXN0ZXItY2EwHhcNMTkwODE2MDc1
+            YSTwYvxfkrxGKtDiLjIZ6Q6LJjMcWLG4x3I0WmGgvytTs04S4B+1vp721jmqRKm9
+            ...
+            ocAT5iL3ZDUj/lwqJRptmzGFcdko+woFae68HRx1ygSgROls7bXy/CwgME0LFFQp
+            B+2YAhUw1sPU410JUxU3/v6R5vJfI9imE75aha3U7UbeOX8+1+Cu3HOT1QMn80k2
+            6LnZeMCCgCBp+Yz3YNeUMRejMU6x4WlhTPO7bBq3tKGgwCoyGIX25wMM1Q==
+            -----END CERTIFICATE-----
+            \"\"\"
+
+        Example with two certificates stored in files in */tmp*::
+
+            mqtt_comp = ...
+            mqtt_comp.trusted_certs = ['/tmp/ca_cert_1.pem', '/tmp/ca_cert_2.pem']
+
+        """
+        if self._trusted_certs:
+            if len(self._trusted_certs) == 1 and self._certs_as_str:
+                return self._trusted_certs[0]
+        return self._trusted_certs
+
+    @trusted_certs.setter
+    def trusted_certs(self, trusted_certs):
+        if isinstance(trusted_certs, str):
+            c = trusted_certs.strip()
+            if c:
+                self._trusted_certs = [c]
+                self._certs_as_str = True
+        elif isinstance(trusted_certs, list):
+            if trusted_certs:
+                # empty list and empty str evaluate to FALSE
+                self._trusted_certs = trusted_certs
+                self._certs_as_str = False
+        else:
+            raise TypeError(trusted_certs)
+
+    @property
+    def truststore(self):
+        """
+        str: The filename of a truststore with certificates that shall be trusted when SSL connections are made.
+        This truststore file is added as a file dependency to the topology.
+        
+        .. note::
+            When this property is set, also the :py:attr:`truststore_password` must be given.
+            
+        """
+        return self._truststore
+
+    @truststore.setter
+    def truststore(self, truststore: str):
+        self._truststore = truststore
+
+    @property
+    def truststore_password(self):
+        """
+        str: The password of the truststore given in :py:attr:`truststore`.
+        """
+        return self._truststore_password
+
+    @truststore_password.setter
+    def truststore_password(self, truststore_password: str):
+        self._truststore_password = truststore_password
+
+    @property
+    def client_cert(self):
+        """
+        str: A client certificate or a filename with a client certificate.
+        Certificates must be given in PEM format or as a filename that contains the PEM formatted certificate.
+        
+        When no keystore file is given with :py:attr:`keystore`, a new keystore is created and added as a file dependency
+        to the topology. Otherwise the certificate is added to the given keystore, 
+        and the keystore is added as a file dependency.
+
+        The private key of the certificate must be provided in :py:attr:`client_private_key`.
+        """
+        return self._client_cert
+
+    @client_cert.setter
+    def client_cert(self, client_cert: str):
+        self._client_cert = client_cert
+
+    @property
+    def client_private_key(self):
+        """
+        str: The private RSA key of a client certificate or a filename with the private key.
+        The key must be given in PEM format literally or as a filename.
+        The client certificate must be provided in :py:attr:`client_cert`.
+        
+        Example::
+        
+            private_key = \"\"\"
+            -----BEGIN PRIVATE KEY-----
+            MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDBqvzZWSC+cF0T
+            cTk6xC9iJDdWyqamh/9HnOVWDLzAKQ0XsdSHONVLjs3fwY8bM1tZywBDUujCujJT
+            NaAW3YDkiVG8v+j90eR6UUc/zlG5zC6tZ6/UlHgXSUOCVuB7d3Y3v9Aoiz8HfPEi
+            0uV+6WOHCPg9df0gwmzPRYDtobMWat0jCXLkekLjc2gx8muPsOnMAaepNHYmfvFn
+            ...
+            I4ahg9LgF3pT8BEr5xxfwX3U/i0pHz5qc+kuuXxfAoGBAI0SmUDSGT7rTgxvwy7o
+            fRIOJz3KlIYZ+JugC6Zj7GYv7fISzVRVENpaeL6jPGmhId/Pu++yT7x9FdmlGfMv
+            UGu65oHRMYGb+dMCeYF6XymSXy1MOHTH38AE27/BHm8bDe/CYJgcKXo+3FvCRal1
+            YBdL1LnNMCOKPo2gPB19HgR7
+            -----END PRIVATE KEY-----
+            \"\"\"
+            
+            mqtt = ...
+            mqtt.client_private_key = private_key
+        
+        Key is stored in a file::
+        
+            mqtt = ...
+            mqtt.client_private_key = '/home/user/private_key.pem'
+        
+        """
+        return self._client_private_key
+
+    @client_private_key.setter
+    def client_private_key(self, client_private_key: str):
+        self._client_private_key = client_private_key
+
+    @property
+    def keystore(self):
+        """
+        The filename of a keystore with client certificate and its private key.
+        This keystore file is added as a file dependency to the topology.
+        
+        .. note::
+            When this property is set, also the :py:attr:`keystore_password` must be given.
+        """
+        return self._keystore
+
+    @keystore.setter
+    def keystore(self, keystore: str):
+        self._keystore = keystore
+
+    @property
+    def keystore_password(self):
+        """
+        str: The password of the keystore given in :py:attr:`keystore`.
+        The same password is used to decrypt the the private key given in :py:attr:`client_private_key`.
+        """
+        return self._keystore_password
+
+    @keystore_password.setter
+    def keystore_password(self, keystore_password: str):
+        self._keystore_password = keystore_password
+
+    @property
+    def ssl_protocol(self):
+        """
+        str: The SSL protocol for SSL connections. The default value is ``TLSv1.2``.
+        """
+        return self._ssl_protocol
+
+    @ssl_protocol.setter
+    def ssl_protocol(self, ssl_protocol: str):
+        self._ssl_protocol = ssl_protocol
+
+    @property
+    def server_uri(self):
+        """
+        str: The URI of the MQTT server, either
+        ``tcp://<hostid>[:<port>]`` or ``ssl://<hostid>[:<port>]``.
         The port defaults to 1883 for "tcp:" and 8883 for "ssl:" URIs.
+        """
+        return self._server_uri
 
-    sslProtocol
-        This optional parameter of type rstring specifies the ssl protocol to 
-        use for making SSL connections. If this parameter is not specified, 
-        the default protocol 'TLSv1.2' will be used. 
+    @server_uri.setter
+    def server_uri(self, server_uri: str):
+        self._server_uri = server_uri
 
-    trustStore
-        Optional String. The pathname to a file containing the
-        public certificate of trusted MQTT servers.  If a relative path
-        is specified, the path is relative to the application directory.
-        Required when connecting to a MQTT server with an 
-        ssl:/... serverURI.
+    @property
+    def reconnection_bound(self):
+        """
+        int: Number of reconnection attempts in case of connect failures.
+        Specify 0 for no retry, a non-zero positive number *n* for *n* retries, or -1 for inifinite retry.
+        """
+        return self._reconnection_bound
+
+    @reconnection_bound.setter
+    def reconnection_bound(self, reconnection_bound: int):
+        if reconnection_bound < -1:
+            raise ValueError(reconnection_bound)
+        self._reconnection_bound = reconnection_bound
+
+    @property
+    def keep_alive_seconds(self):
+        """
+        int: Automatically generate an MQTT ping message to the server if a message or ping hasn't been
+        sent or received in the last keelAliveInterval seconds. 
+        Enables the client to detect if the server is no longer available
+        without having to wait for the TCP/IP timeout. A value of 0 disables keepalive processing.
+        The default is 60.
+        """
+        return self._keep_alive_seconds
+
+    @keep_alive_seconds.setter
+    def keep_alive_seconds(self, keep_alive_seconds: int):
+        if keep_alive_seconds < 0:
+            raise ValueError(keep_alive_seconds)
+        self._keep_alive_seconds = keep_alive_seconds
+
+    @property
+    def command_timeout_millis(self):
+        """
+        int: The maximum time in milliseconds to wait for an MQTT connect or publish action to complete.
+        A value of 0 causes the client to wait infinitely.
+        The default is 0.
+        """
+        return self._command_timeout_millis
+
+    @command_timeout_millis.setter
+    def command_timeout_millis(self, command_timeout_millis: int):
+        if command_timeout_millis < 0:
+            raise ValueError(command_timeout_millis)
+        self._command_timeout_millis = command_timeout_millis
+
+    @property
+    def client_id(self):
+        """
+        str: A unique identifier for a connection to the MQTT server. The MQTT broker only allows a single
+        connection for a particular clientID. By default a unique client ID is automatically
+        generated.
+        """
+        return self._client_id
+
+    @client_id.setter
+    def client_id(self, client_id: str):
+        self._client_id = client_id
+
+    def _check_types(self):
+        if self._trusted_certs is not None:
+            # the setter ensures that a string is converted to a one element list
+            for c in self._trusted_certs:
+                if not isinstance(c, str):
+                    raise TypeError('trusted_certs must be of type str or list of str')
+        if self._vm_arg is not None:
+            if not isinstance(self._vm_arg, str) and not isinstance(self._vm_arg, list):
+                raise TypeError('vm_arg must be of type str or list of str')
+            if isinstance(self._vm_arg, list):
+                for v in self._vm_arg:
+                    if not isinstance(v, str):
+                        raise TypeError('vm_arg must be of type str or list of str')
     
-    trustStorePassword
-        Required String when trustStore is used.
-        The password needed to access the encrypted trustStore file.
+    def _check_adjust(self):
+        if self._truststore:
+            if not self._truststore_password:
+                raise ValueError('the truststore property requires the truststore_password property to be set')
+        if self._client_cert:
+            if not self._client_private_key:
+                raise ValueError('the client_cert property requires the client_private_key property to be set')
+        if self._keystore:
+            if not self._keystore_password:
+                raise ValueError('the keystore property requires the keystore_password property to be set')
+        if not self._server_uri:
+            raise ValueError('the server_uri property is required.')
 
-    userID
-        Optional String.  The identifier to use when authenticating
-        with a server configured to require that form of authentication.
+    def create_spl_params(self, topology) -> dict:
+        spl_params = dict()
+        if self.trusted_certs:
+            if self.truststore:
+                print("adding trusted certificate(s) to truststore: " + self.truststore)
+                extend_truststore(self.trusted_certs, self.truststore, self.truststore_password)
+            else:
+                # create truststore with given certificates
+                truststore_basename = 'truststore-' + _generate_random_digits(16) + '.jks'
+                truststore_filepath = os.path.join(gettempdir(), truststore_basename)
+                print("adding trusted certificate(s) to new truststore: " + truststore_filepath)
+                truststore_pass = create_truststore(self.trusted_certs, truststore_filepath)
+                print("truststore password is: " + truststore_pass)
+                topology.add_file_dependency(truststore_filepath, 'etc')
+                spl_params['trustStore'] = 'etc/' + truststore_basename
+                spl_params['trustStorePassword'] = truststore_pass
+
+        if self.truststore:
+            topology.add_file_dependency(self.truststore, 'etc')
+            spl_params['trustStore'] = 'etc/' + os.path.basename(self.truststore)
+            spl_params['trustStorePassword'] = self.truststore_password
+       
+        if self.client_cert:
+            if self.keystore:
+                print("adding client cert and key to keystore: " + self.keystore)
+                extend_keystore(self.client_cert, self.client_private_key, self.keystore, self.keystore_password)
+            else:
+                # create keystore with given certificate and key
+                keystore_basename = 'keystore-' + _generate_random_digits(16) + '.jks'
+                keystore_filepath = os.path.join(gettempdir(), keystore_basename)
+                print("adding client certificate and key to new keystore: " + keystore_filepath)
+                keystore_pass = create_keystore(self.client_cert, self.client_private_key, keystore_filepath)
+                print("keystore password is: " + keystore_pass)
+                topology.add_file_dependency(keystore_filepath, 'etc')
+                spl_params['keyStore'] = 'etc/' + keystore_basename
+                spl_params['keyStorePassword'] = keystore_pass
+        
+        if self.keystore:
+            topology.add_file_dependency(self.keystore, 'etc')
+            spl_params['keyStore'] = 'etc/' + os.path.basename(self.keystore)
+            spl_params['keyStorePassword'] = self.keystore_password
     
-    userPropName
-        This parameter specifies the property name of user name in the 
-        application configuration. If the appConfigName parameter is 
-        specified and the userPropName parameter is not set, a compile time error occurs
+        spl_params['serverURI'] = self.server_uri
+        spl_params['keepAliveInterval'] = self.keep_alive_seconds
+        spl_params['reconnectionBound'] = self.reconnection_bound
+        if self.reconnection_bound != 0:
+            spl_params['period'] = streamsx.spl.types.int64(30)
+        
+        if self.app_config_name:
+            spl_params['appConfigName'] = self.app_config_name
+            spl_params['passwordPropName'] = MQTTComposite._APP_CONFIG_PROP_NAME_FOR_PASSWORD
+            spl_params['userPropName'] = MQTTComposite._APP_CONFIG_PROP_NAME_FOR_USERNAME
+        if self.username:
+            spl_params['userID'] = self.username
+        if self.password:
+            spl_params['password'] = self.password
+        if self.client_id:
+            spl_params['clientID'] = self.client_id
+        if self.command_timeout_millis is not None:
+            spl_params['commandTimeout'] = streamsx.spl.types.int64(self.command_timeout_millis)
+        if self.ssl_protocol:
+            spl_params['sslProtocol'] = self.ssl_protocol
+        if self.vm_arg or self.ssl_debug:
+            vmargs = []
+            if isinstance(self.vm_arg, list):
+                vmargs.extend(self.vm_arg)
+            elif isinstance(self.vm_arg, str):
+                vmargs.append(self.vm_arg)
+            if self.ssl_debug:
+                vmargs.append('-Djavax.net.debug=all')
+            spl_params['vmArg'] = vmargs
+        return spl_params
 
-"""
 
-def mqtt_sink(stream,
-              config,                                # mandatory, either containing appConfig name or all needed parameters
-              topic = None,                          # mandatory but mutual exclive with 'topic_attribute_name'
-              topic_attribute_name = None,           # mandatory but mutual exclive with 'topic'
-              data_attribute_name = None,            # default: (only 1 attribute in schema ? attribute name : 'data')
-              name = None                     
-              ):
+class MQTTSink(MQTTComposite, AbstractSink):
     """
-    Creates a MQTT client for sending data to a MQTT server.
-
-    Parameter: 
-        stream
-            mandatory
-            stream of tuples which should be processed
-        config
-            mandatory
-            general MQTT connection configuration
-        topic
-            mandatory but (mutual exclusive with 'topic_attribute_name')
-            topic to which all tuples data of the stream 
-            should be sent 
-        topic_attribute_name
-            mandatory but (mutual exclusive with 'topic')
-            attribute in each tuple which defines the topic 
-            the tuple data should be sent to
-        data_attribute_name
-            optional
-            name of the tuple attribute containing the data which
-            should be sent, if not specified: a one attribute tuple
-            will send this attribute, when multiple attributes are 
-            in the tuple a 'data' attribute will be used
-        name  
-            optional 
-            name of the operator (used in visualization and logging)
-
-    Returns:
-        None
-
-    Hints:
-        Not the whole tuple but only one attribute (defined as the data to be sent). 
-        So the input stream has to contain at least this one attribute. But it can 
-        have multiple attributes which are ignored. In case parameter 
-        'topic_attribute_name' is used this attribute defines the topic the tuples 
-        data should be sent to. This attribute has to be of a string type. As the 
-        underlying operator is requires a structured tuple. The input stream schema
-        has to be structured.
-
-    Example::
-
-        class MqttDataTuple(typing.NamedTuple):
-            topic_name: str
-            data:       str
-
-        topo = Topology(name)
-        mqtt_config = {}
-        mqtt_config[serverURI]  = 'ssl://my.mqtt.broker'
-        mqtt_config['userID']   = 'xxxx'
-        mqtt_config['password'] = 'xxxx'
-     
-        ...
-        # in this scenario your stream need to be a structured schema type
-        # with attribute 'data' containing the data to be sent
-        # e.g. the above type 'MqttDataTuple'
+    The ``MQTTSink`` represents a stream termination that publishes messages to one or more MQTT topics.
+    Instances can be passed to ``Stream.for_each()`` to create a sink (stream termination).
     
-        # create some streaming content
-        sink_stream = create_your_stream(topo)    
-
-        # send content of attribute 'data' (default) to topic 'test_topic' 
-        # to the mqtt_broker configured in mqtt_config
-        # additional attributes in the tuples will be ignored 
-        mqtt.mqtt_sink(sink_stream,mqtt_config,topic='test_topic')
-
-        # subscribe to topic 'test_topic' on the mqtt_broker configured
-        # in mqtt_config
-        # generate a stream with schema of class MqttDataTuple
-        # message data is written to (default) 'data' attribute, the topic 
-        # the message was received from is written to attribute 'topic_name'
-        source_stream = mqtt.mqtt_source(topo, [MqttDataTuple], mqtt_config, 'test_topic', topic_attribute_name = 'topic_name')
-
+    Args:
+        server_uri(str): The MQTT server URI
+        topic(str): The topic to publish the messages to. Mutually exclusive with ``topic_attribute_name``.
+        topic_attribute_name(str): The name of a tuple attribute denoting the destination topic.
+            Mutually exclusive with ``topic``.
+        data_attribute_name(str): The name of the tuple attribute containing the message data to be published. ``data`` is assumed as default.
     """
+    def __init__(self, server_uri, topic=None, topic_attribute_name=None, data_attribute_name = None):
+        MQTTComposite.__init__(self)
+        AbstractSink.__init__(self)
+        if not topic and not topic_attribute_name:
+            raise ValueError('One of topic or topic_attribute_name is required')
+        if topic and topic_attribute_name:
+            raise ValueError('Only one of topic or topic_attribute_name is allowed')
+        if not server_uri:
+            raise ValueError(server_uri)
+        self.server_uri = server_uri
+        
+        self._retain = False
+        self._topic = topic
+        self._topic_attribute_name = topic_attribute_name
+        self._data_attribute_name = data_attribute_name
+        self._qos = None
 
-    params = config.copy()
+    def create_spl_params(self, topology) -> dict:
+        spl_params = MQTTComposite.create_spl_params(self, topology)
+        if self.qos is not None:
+           spl_params['qos'] = self.qos
 
-    if data_attribute_name is not None:
-        params['dataAttributeName'] = data_attribute_name
-    if (topic is not None) and (topic_attribute_name is not None):
-        raise ValueError("Invalid topic configuration: Set either 'topic' or 'topic_attribute_name' parameter.")
-    if (topic is None) and (topic_attribute_name is None):
-        raise ValueError("No topic configuration: Set either 'topic' or 'topic_attribute_name' parameter.")
-    if (topic is not None):
-        params['topic'] = topic
-    if (topic_attribute_name is not None):
-        params['topicAttributeName'] = topic_attribute_name
+        if self._topic:
+            spl_params['topic'] = self._topic
+        if self._topic_attribute_name:
+            spl_params['topicAttributeName'] = self._topic_attribute_name
+        if self._retain:
+            spl_params['retain'] = self._retain
+        #verify that we do not setup invalid SPL parameters
+        for paramName in spl_params.keys():
+            if not paramName in _MqttSink.SUPPORTED_SPL_PARAMS:
+                raise AttributeError('illegal operator parameter: {}'.format(paramName))
+        return spl_params
 
-    _op = _MqttSink(stream,params,name)
+    @property
+    def qos(self):
+        """
+        int: qos value for publishing messages. Allowed values are 0, 1, and 2.
+        """
+        return self._qos
 
-    return None
+    @qos.setter
+    def qos(self, qos):
+        if qos is not None:
+            if not isinstance(qos, int):
+                raise TypeError(qos)
+            if 0 <= qos <= 2:
+                pass
+            else:
+                raise ValueError('qos must be 0, 1, or 2')
+        self._qos = qos
+
+    @property
+    def retain(self):
+        """
+        bool: Indicates if messages should be retained on the MQTT server if there is no subscription for the topic. The default is ``False``.
+        """
+        return self._retain
+
+    @retain.setter
+    def retain(self, retain: bool):
+        self._retain = retain
+
+    def populate(self, topology, stream, name, **options):
+        self._check_types()
+        self._check_adjust()
+        spl_params = self.create_spl_params(topology)
+        #derive 'dataAttributeName' from schema
+        schema = stream.oport.schema
+        if schema is CommonSchema.Json:
+            spl_params['dataAttributeName'] = 'jsonString'
+        elif schema is CommonSchema.String:
+            spl_params['dataAttributeName'] = 'string'
+            # TODO add more pre-defined schemas
+        else:
+            if self._data_attribute_name:
+                spl_params['dataAttributeName'] = self._data_attribute_name
+
+        op = _MqttSink(stream, spl_params, name)
+        return streamsx.topology.topology.Sink(op)
 
 
-def mqtt_source(topology,                            # mandatory, topology the source should be added to
-              schema,                                # mandatory, output schema
-              config,
-              topics,                                # mandatory, list of topics to subscribe to
-              topic_attribute_name = None,           # attribute holding the topic of the message
-              data_attribute_name = None,            # default: only 1 attribute in schema?it's name:look for 'data' attribute
-              name = None               
-              ):
+class MQTTSource(MQTTComposite, AbstractSource):
     """
-    Creates a MQTT client for receiving data (topology source) by subscribing to topics
-    on a MQTT server.
-
-    Parameter: 
-        topology
-            mandatory
-            the topology this data source is added to
-        schema 
-            mandatory
-            a schema definition for the type of the stream providing
-            the received data
-        config
-            mandatory 
-            general MQTT connection configuration
-        topics
-            mandatory
-            list of topics this MQTT client is subscribing to 
-        topic_attribute_name
-            optional
-            attribute in the schema which will contain the topic the
-            tuple data was received from
-        data_attribute_name
-            optional
-            name of the tuple attribute containing the data 
-            if not specified: if the schema contains only one attribute
-            this one will contain the data, when multiple attributes are 
-            in the schema a 'data' attribute will be used
-        name  
-            optional 
-            name of the operator (used in visualization and logging)
-
-    Returns:
-        Stream (of type 'schema') of received data
-
-    Example::
-
-        class MqttDataTuple(typing.NamedTuple):
-            topic_name: str
-            data:       str
-
-        topo = Topology(name)
-        mqtt_config = {}
-        mqtt_config[serverURI]  = 'ssl://my.mqtt.broker'
-        mqtt_config['userID']   = 'xxxx'
-        mqtt_config['password'] = 'xxxx'
-        ...
-        # in this scenario your stream need to be a structured schema type
-        # with attribute 'data' containing the data to be sent
-        # e.g. the above type 'MqttDataTuple'
+    Represents a source for messages read from an MQTT server, which can be passed to 
+    ``Topology.source()`` to create a stream.
     
-        # create some streaming content
-        sink_stream = create_your_stream(topo)    
-
-        # send content of attribute 'data' (default) to topic 'test_topic' 
-        # to the mqtt_broker configured in mqtt_config
-        # additional attributes in the tuples will be ignored 
-        mqtt.mqtt_sink(sink_stream,mqtt_config,topic='test_topic')
-
-        # subscribe to topic 'test_topic' on the mqtt_broker configured
-        # in mqtt_config
-        # generate a stream with schema of class MqttDataTuple
-        # message data is written to (default) 'data' attribute, the topic 
-        # the message was received from is written to attribute 'topic_name'
-        source_stream = mqtt.mqtt_source(topo, [MqttDataTuple], mqtt_config, 'test_topic', topic_attribute_name = 'topic_name')
-
+    Args:
+        server_uri(str): The MQTT server URI
+        topics(str|list): The topic or topics to subscribe for messages.
+        schema: The schema of the created stream
+        data_attribute_name(str): The name of the tuple attribute containing the message data. ``data`` is assumed as default.
+        topic_attribute_name(str): The name of a tuple attribute denoting the source topic of received messages.
     """
-
-
-    params = config.copy()
-    # retain is for MQTT msg publish only
-    if ('retain' in params):
-        del params['retain']
-    if (topics is not None):
-        params['topics'] = topics
-    else:
-        raise ValueError("Invalid topic configuration: You must set a topic to subscribe to.")
-    if (topic_attribute_name is not None):
-        params['topicOutAttrName'] = topic_attribute_name
-    if (data_attribute_name is not None):
-        params['dataAttributeName'] = data_attribute_name
-
-    _operator = _MqttSource(topology,schema,params,name)
     
-    return _operator.outputs[0]
+    def __init__(self, server_uri, topics, schema, data_attribute_name=None, topic_attribute_name=None):
+        MQTTComposite.__init__(self)
+        AbstractSource.__init__(self)
+        if not topics:
+            raise ValueError(topics)
+        if not server_uri:
+            raise ValueError(server_uri)
+        if not schema:
+            raise ValueError(schema)
+        self.server_uri = server_uri
+        self._schema = schema
+        self._topics = topics
+        self._topic_attribute_name = topic_attribute_name
+        self._data_attribute_name = data_attribute_name
+        self._qos = None
+        self._message_queue_size = 500
+        
+    @property
+    def qos(self):
+        """
+        int|list: qos values for the messages to subscribe.
+        
+        Example::
+        
+            mqttSource = MQTTSource('tcp://host.domain:1883', ['topic1', 'topic2'], CommonSchema.String)
+            mqttSource.qos = 2
+
+        The qos value can also be a list of integers::
+        
+            mqttSource = MQTTSource('tcp://host.domain:1883', ['topic1', 'topic2'], CommonSchema.String)
+            mqttSource.qos = [1, 2]
+        """
+        return self._qos
+
+    @qos.setter
+    def qos(self, qos):
+        # qos in [0..2]
+        if qos is not None:
+            if isinstance(qos, int):
+                if 0 <= qos <= 2:
+                    pass
+                else:
+                    raise ValueError('qos must be 0, 1, or 2')
+                self._qos = qos
+            elif isinstance(qos, list):
+                for q in qos:
+                    if isinstance(q, int):
+                        if 0 <= q <= 2:
+                            pass
+                        else:
+                            raise ValueError('qos must be 0, 1, or 2')
+                    else:
+                        raise TypeError('qos must be int or list of int')
+                if qos:
+                    # non emty list
+                    self._qos = qos
+                else:
+                    raise ValueError('qos must not be an empty list')
+            else:
+                raise TypeError(qos)
+        else:
+            self._qos = qos
+
+    @property
+    def message_queue_size(self):
+        """
+        int: The size, in number of messages, of an internal receive buffer.
+        The receiver stops fetching messages when the buffer is full.
+        The default is 500.
+        """
+        return self._message_queue_size
+
+    @message_queue_size.setter
+    def message_queue_size(self, message_queue_size: int):
+        if message_queue_size < 1:
+            raise ValueError(message_queue_size)
+        self._message_queue_size = message_queue_size
+
+    def create_spl_params(self, topology) -> dict:
+        spl_params = MQTTComposite.create_spl_params(self, topology)
+        if isinstance(self.qos, int):
+            spl_params['qos'] = self.qos
+        elif isinstance(self.qos, list):
+             # topology converts list of int to SPL list of rstring; use the qosStr parameter as workaround
+            spl_params['qos'] = streamsx.spl.op.Expression.expression(','.join([str(qos) for qos in self.qos]))
+        if self._topics:
+            spl_params['topics'] = self._topics
+            
+        if self._topic_attribute_name:
+            spl_params['topicOutAttrName'] = self._topic_attribute_name
+        spl_params['messageQueueSize'] = self._message_queue_size
+        #verify that we do not setup invalid SPL parameters
+        for paramName in spl_params.keys():
+            if not paramName in _MqttSource.SUPPORTED_SPL_PARAMS:
+                raise AttributeError('illegal operator parameter: {}'.format(paramName))
+        return spl_params
+
+    def populate(self, topology, name, **options):
+        self._check_types()
+        self._check_adjust()
+        spl_params = self.create_spl_params(topology)
+        #derive 'dataAttributeName' from schema
+        if self._schema is CommonSchema.Json:
+            spl_params['dataAttributeName'] = 'jsonString'
+        elif self._schema is CommonSchema.String:
+            spl_params['dataAttributeName'] = 'string'
+            # TODO add more pre-defined schemas
+        else:
+            if self._data_attribute_name:
+                spl_params['dataAttributeName'] = self._data_attribute_name
+
+        op = _MqttSource(topology, self._schema, spl_params, name)
+#        if 'qosStr' in op.params:
+#            op.params['qos'] = op.expression( op.params['qosStr'])
+        return op.outputs[0]
 
 
 class _MqttSource(streamsx.spl.op.Source):
-    def __init__(self, 
-              topology, 
-              schema,
-              config,                           # configuration dictionary to hold all parameters of the SPL operator
-              name=None):
 
+    SUPPORTED_SPL_PARAMS = set(['topics', 'appConfigName', 'clientID',
+                                'commandTimeout', 'connection', 'connectionDocument',
+                                'dataAttributeName', 'keepAliveInterval', 'keyStore',
+                                'keyStorePassword', 'messageQueueSize', 'password',
+                                'passwordPropName', 'period', 'qos', 'qosStr',
+                                'reconnectionBound', 'serverURI', 'sslProtocol',
+                                'topicOutAttrName', 'trustStore', 'trustStorePassword',
+                                'userID', 'userPropName', 'vmArg'])
+    
+    def __init__(self, topology, schema, spl_params, name=None):
         kind="com.ibm.streamsx.mqtt::MQTTSource"
-        super(_MqttSource, self).__init__(topology,kind,schema,config,name)
+        super(_MqttSource, self).__init__(topology, kind, schema, spl_params, name)
+
 
 class _MqttSink(streamsx.spl.op.Sink):
-    def __init__(self, 
-              stream, 
-              config,                                # configuration dictionary to hold all parameters of the SPL operator
-              name=None):
+    
+    SUPPORTED_SPL_PARAMS = set(['appConfigName', 'clientID', 'commandTimeout', 'connection',
+                                'connectionDocument', 'dataAttributeName', 'keepAliveInterval',
+                                'keyStore', 'keyStorePassword', 'password', 'passwordPropName',
+                                'period', 'qos', 'qosAttributeName', 'reconnectionBound', 'retain',
+                                'serverURI', 'sslProtocol', 'topic', 'topicAttributeName',
+                                'trustStore', 'trustStorePassword', 'userID', 'userPropName', 'vmArg'])
 
-        kind="com.ibm.streamsx.mqtt::MQTTSink"
-
-        super(_MqttSink, self).__init__(kind,stream,config,name)
+    def __init__(self, stream, spl_params, name=None):
+        kind = "com.ibm.streamsx.mqtt::MQTTSink"
+        super(_MqttSink, self).__init__(kind, stream, spl_params, name)
 
