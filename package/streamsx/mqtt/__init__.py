@@ -24,7 +24,7 @@ A simple example of a Streams application uses the :py:class:`~MQTTSink` and :py
     from streamsx.topology.schema import CommonSchema
     
     mqtt_server_uri = 'tcp://host.domain:1883'
-    s='Each character will be an MQTT message'
+    s = 'Each character will be an MQTT message'
     topology = Topology()
     data = topology.source([c for c in s]).as_string()
     # publish to MQTT
