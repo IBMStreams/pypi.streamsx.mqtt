@@ -26,7 +26,7 @@ class MQTTComposite(object):
     _APP_CONFIG_PROP_NAME_FOR_PASSWORD = 'password'
     _APP_CONFIG_PROP_NAME_FOR_USERNAME = 'username'
 
-    def __init__(self):
+    def __init__(self, **options):
         self._vm_arg = None
         self._app_config_name = None
         self._username = None
@@ -45,6 +45,40 @@ class MQTTComposite(object):
         self._command_timeout_millis = None
         self._client_id = None
         self._ssl_debug = False
+        if 'vm_arg' in options:
+            self.vm_arg = options.get('vm_arg')
+        if 'ssl_debug' in options:
+            self.ssl_debug = options.get('ssl_debug')
+        if 'app_config_name' in options:
+            self.app_config_name = options.get('app_config_name')
+        if 'username' in options:
+            self.username = options.get('username')
+        if 'password' in options:
+            self.password = options.get('password')
+        if 'trusted_certs' in options:
+            self.trusted_certs = options.get('trusted_certs')
+        if 'truststore' in options:
+            self.truststore = options.get('truststore')
+        if 'truststore_password' in options:
+            self.truststore_password = options.get('truststore_password')
+        if 'client_cert' in options:
+            self.client_cert = options.get('client_cert')
+        if 'client_private_key' in options:
+            self.client_private_key = options.get('client_private_key')
+        if 'keystore' in options:
+            self.keystore = options.get('keystore')
+        if 'keystore_password' in options:
+            self.keystore_password = options.get('keystore_password')
+        if 'ssl_protocol' in options:
+            self.ssl_protocol = options.get('ssl_protocol')
+        if 'reconnection_bound' in options:
+            self.reconnection_bound = options.get('reconnection_bound')
+        if 'keep_alive_seconds' in options:
+            self.keep_alive_seconds = options.get('keep_alive_seconds')
+        if 'command_timeout_millis' in options:
+            self.command_timeout_millis = options.get('command_timeout_millis')
+        if 'client_id' in options:
+            self.client_id = options.get('client_id')
 
     @property
     def ssl_debug(self):
@@ -463,9 +497,10 @@ class MQTTSink(MQTTComposite, AbstractSink):
         topic_attribute_name(str): The name of a tuple attribute denoting the destination topic.
             Mutually exclusive with ``topic``.
         data_attribute_name(str): The name of the tuple attribute containing the message data to be published. ``data`` is assumed as default.
+        **options(kwargs): optional parameters as keyword arguments
     """
-    def __init__(self, server_uri, topic=None, topic_attribute_name=None, data_attribute_name = None):
-        MQTTComposite.__init__(self)
+    def __init__(self, server_uri, topic=None, topic_attribute_name=None, data_attribute_name=None, **options):
+        MQTTComposite.__init__(self, **options)
         AbstractSink.__init__(self)
         if not topic and not topic_attribute_name:
             raise ValueError('One of topic or topic_attribute_name is required')
@@ -480,6 +515,11 @@ class MQTTSink(MQTTComposite, AbstractSink):
         self._topic_attribute_name = topic_attribute_name
         self._data_attribute_name = data_attribute_name
         self._qos = None
+        if 'qos' in options:
+            self.qos = options.get('qos')
+        if 'retain' in options:
+            self.retain = options.get('retain')
+        
 
     def create_spl_params(self, topology) -> dict:
         spl_params = MQTTComposite.create_spl_params(self, topology)
@@ -557,10 +597,11 @@ class MQTTSource(MQTTComposite, AbstractSource):
         schema: The schema of the created stream
         data_attribute_name(str): The name of the tuple attribute containing the message data. ``data`` is assumed as default.
         topic_attribute_name(str): The name of a tuple attribute denoting the source topic of received messages.
+        **options(kwargs): optional parameters as keyword arguments
     """
     
-    def __init__(self, server_uri, topics, schema, data_attribute_name=None, topic_attribute_name=None):
-        MQTTComposite.__init__(self)
+    def __init__(self, server_uri, topics, schema, data_attribute_name=None, topic_attribute_name=None, **options):
+        MQTTComposite.__init__(self, **options)
         AbstractSource.__init__(self)
         if not topics:
             raise ValueError(topics)
@@ -575,6 +616,10 @@ class MQTTSource(MQTTComposite, AbstractSource):
         self._data_attribute_name = data_attribute_name
         self._qos = None
         self._message_queue_size = 500
+        if 'qos' in options:
+            self.qos = options.get('qos')
+        if 'message_queue_size' in options:
+            self.message_queue_size = options.get('message_queue_size')
         
     @property
     def qos(self):
