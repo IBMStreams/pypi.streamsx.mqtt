@@ -22,47 +22,15 @@ def cloud_creds_env_var():
         os.environ['IOT_SERVICE_CREDENTIALS']
     except KeyError: 
         result = False
-
     return result
+
 
 class MqttDataTuple(typing.NamedTuple):
     topic_name: str
     data: str
 
 
-class Test(unittest.TestCase):
-
-    @classmethod
-    def setUpClass(self):
-        print (str(self))
-        self.mqtt_toolkit_home = os.environ["MQTT_TOOLKIT_HOME"]
-        
-    def _build_only(self, name, topo):
-        result = streamsx.topology.context.submit(ContextTypes.TOOLKIT, topo.graph) # creates tk* directory
-        print(name + ' (TOOLKIT):' + str(result))
-        assert(result.return_code == 0)
-        result = streamsx.topology.context.submit(ContextTypes.BUNDLE, topo.graph)  # creates sab file
-        print(name + ' (BUNDLE):' + str(result))
-        assert(result.return_code == 0)
-
-    def _get_app_config(self):
-        creds_file = pathlib.Path.cwd().joinpath('streamsx','mqtt', 'tests', 'appConfig.json')
-        with open(creds_file) as data_file:
-            credentials = json.load(data_file)
-        
-        # credentials = json.loads('{"userID" : "user", "password" : "xxx", "serverURI" : "xxx" }')
-        return credentials
-
-    def _get_device_config(self):
-        creds_file = pathlib.Path.cwd().joinpath('streamsx','mqtt', 'tests', 'deviceConfig.json')
-        with open(creds_file) as data_file:
-            credentials = json.load(data_file)
-        return credentials
-
-    def _create_stream(self, topo):
-        s = topo.source([("test",'{"id":"testid1"}'),("test",'{"id":"testid2"}'),("test",'{"id":"testid3"}')])
-        return s.map(lambda x : {'topic_name':x[0],'data':x[1]}, schema=MqttDataTuple)
-
+class TestParams(unittest.TestCase):
     def test_bad_param(self):
         print ('\n---------'+str(self))
         # constructor tests
@@ -110,7 +78,138 @@ class Test(unittest.TestCase):
             sink.keep_alive_seconds = -1
         with self.assertRaises(ValueError):
             sink.command_timeout_millis = -1
+
+    def test_options_kwargs_MQTTSink(self):
+        print ('\n---------'+str(self))
+        sink = MQTTSink(server_uri='tcp://server:1833',
+                        topic='topic1',
+                        data_attribute_name='data',
+                        #kwargs
+                        vm_arg = ["-Xmx1G"],
+                        ssl_debug = True,
+                        reconnection_bound = 5,
+                        qos = 2,
+                        trusted_certs = ['cert1', 'cert2'],
+                        truststore = "/truststore",
+                        truststore_password = "trustpasswd",
+                        client_cert = 'client_cert',
+                        client_private_key = 'private_key',
+                        keystore = "/keystore",
+                        keystore_password = "keypasswd",
+                        ssl_protocol = 'TLSv1.2',
+                        app_config_name = "abbconf",
+                        client_id = "client-IDsink",
+                        command_timeout_millis = 47,
+                        keep_alive_seconds = 3,
+                        password = "passw0rd",
+                        username = "rolef",
+                        retain = True)
+        self.assertEqual(sink.server_uri, 'tcp://server:1833')
+        self.assertEqual(sink._topic, 'topic1')
+        self.assertEqual(sink._data_attribute_name, 'data')
+        self.assertEqual(sink.reconnection_bound, 5)
+        self.assertEqual(sink.ssl_debug, True)
+        self.assertListEqual(sink.vm_arg, ["-Xmx1G"])
+        self.assertEqual(sink.qos, 2)
+        self.assertListEqual(sink.trusted_certs, ['cert1', 'cert2'])
+        self.assertEqual(sink.truststore, '/truststore')
+        self.assertEqual(sink.truststore_password, 'trustpasswd')
+        self.assertEqual(sink.client_cert, 'client_cert')
+        self.assertEqual(sink.client_private_key, 'private_key')
+        self.assertEqual(sink.keystore, '/keystore')
+        self.assertEqual(sink.keystore_password, 'keypasswd')
+        self.assertEqual(sink.ssl_protocol, 'TLSv1.2')
+        self.assertEqual(sink.app_config_name, 'abbconf')
+        self.assertEqual(sink.client_id, 'client-IDsink')
+        self.assertEqual(sink.command_timeout_millis, 47)
+        self.assertEqual(sink.keep_alive_seconds, 3)
+        self.assertEqual(sink.password, 'passw0rd')
+        self.assertEqual(sink.username, 'rolef')
+        self.assertEqual(sink.retain, True)
+
+    def test_options_kwargs_MQTTSource(self):
+        print ('\n---------'+str(self))
+        src = MQTTSource(server_uri='tcp://server:1833',
+                         topics=['topic1', 'topic2'],
+                         schema=[MqttDataTuple],
+                         data_attribute_name='data',
+                         #kwargs
+                         vm_arg = ["-Xmx1G"],
+                         ssl_debug = True,
+                         reconnection_bound = 5,
+                         qos = [1, 2],
+                         message_queue_size = 122,
+                         trusted_certs = ['cert1', 'cert2'],
+                         truststore = "/truststore",
+                         truststore_password = "trustpasswd",
+                         client_cert = 'client_cert',
+                         client_private_key = 'private_key',
+                         keystore = "/keystore",
+                         keystore_password = "keypasswd",
+                         ssl_protocol = 'TLSv1.2',
+                         app_config_name = "abbconf",
+                         client_id = "client-IDsink",
+                         command_timeout_millis = 47,
+                         keep_alive_seconds = 3,
+                         password = "passw0rd",
+                         username = "rolef")
+        self.assertEqual(src.server_uri, 'tcp://server:1833')
+        self.assertListEqual(src._topics, ['topic1', 'topic2'])
+        self.assertEqual(src._data_attribute_name, 'data')
+        self.assertEqual(src.reconnection_bound, 5)
+        self.assertEqual(src.ssl_debug, True)
+        self.assertListEqual(src.vm_arg, ["-Xmx1G"])
+        self.assertListEqual(src.qos, [1,2])
+        self.assertListEqual(src.trusted_certs, ['cert1', 'cert2'])
+        self.assertEqual(src.truststore, '/truststore')
+        self.assertEqual(src.truststore_password, 'trustpasswd')
+        self.assertEqual(src.client_cert, 'client_cert')
+        self.assertEqual(src.client_private_key, 'private_key')
+        self.assertEqual(src.keystore, '/keystore')
+        self.assertEqual(src.keystore_password, 'keypasswd')
+        self.assertEqual(src.ssl_protocol, 'TLSv1.2')
+        self.assertEqual(src.app_config_name, 'abbconf')
+        self.assertEqual(src.client_id, 'client-IDsink')
+        self.assertEqual(src.command_timeout_millis, 47)
+        self.assertEqual(src.keep_alive_seconds, 3)
+        self.assertEqual(src.password, 'passw0rd')
+        self.assertEqual(src.username, 'rolef')
+        self.assertEqual(src.message_queue_size, 122)
+    
+    
+class Test(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        print (str(self))
+        self.mqtt_toolkit_home = os.environ["MQTT_TOOLKIT_HOME"]
         
+    def _build_only(self, name, topo):
+        result = streamsx.topology.context.submit(ContextTypes.TOOLKIT, topo.graph) # creates tk* directory
+        print(name + ' (TOOLKIT):' + str(result))
+        assert(result.return_code == 0)
+        result = streamsx.topology.context.submit(ContextTypes.BUNDLE, topo.graph)  # creates sab file
+        print(name + ' (BUNDLE):' + str(result))
+        assert(result.return_code == 0)
+
+    def _get_app_config(self):
+        creds_file = pathlib.Path.cwd().joinpath('streamsx','mqtt', 'tests', 'appConfig.json')
+        with open(creds_file) as data_file:
+            credentials = json.load(data_file)
+        
+        # credentials = json.loads('{"userID" : "user", "password" : "xxx", "serverURI" : "xxx" }')
+        return credentials
+
+    def _get_device_config(self):
+        creds_file = pathlib.Path.cwd().joinpath('streamsx','mqtt', 'tests', 'deviceConfig.json')
+        with open(creds_file) as data_file:
+            credentials = json.load(data_file)
+        return credentials
+
+    def _create_stream(self, topo):
+        s = topo.source([("test",'{"id":"testid1"}'),("test",'{"id":"testid2"}'),("test",'{"id":"testid3"}')])
+        return s.map(lambda x : {'topic_name':x[0],'data':x[1]}, schema=MqttDataTuple)
+
 
     def test_compile_MQTTSource(self):
         print ('\n---------'+str(self))
@@ -140,7 +239,6 @@ class Test(unittest.TestCase):
         source_stream.print()
         # build only
         self._build_only(name, topo)
-
 
     def test_compile_MQTTSink(self):
         print ('\n---------'+str(self))
