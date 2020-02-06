@@ -41,7 +41,7 @@ A simple example of a Streams application uses the :py:class:`~MQTTSink` and :py
 """
 
 
-__version__='0.2.0'
+__version__='0.2.1'
 
 __all__ = ['MQTTSink', 'MQTTSource']
 from streamsx.mqtt._mqtt import MQTTSink, MQTTSource
