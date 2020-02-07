@@ -1,8 +1,8 @@
 streamsx.mqtt package
 #####################
 
-IBM Streams MQTT integration
-============================
+MQTT integration for IBM Streams topology applications
+======================================================
 
 For details of implementing applications in Python
 for IBM Streams including IBM Cloud Pak for Data and the Streaming Analytics service

@@ -5,7 +5,7 @@ setup(
     packages=['streamsx.mqtt'],
     include_package_data=True,
     version=streamsx.mqtt.__version__,
-    description='IBM Streams MQTT integration',
+    description='MQTT integration for IBM Streams topology applications',
     long_description=open('DESC.txt').read(),
     author='IBM Streams @ github.com',
     author_email='rolef.heinrich@de.ibm.com',
