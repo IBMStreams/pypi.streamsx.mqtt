@@ -749,7 +749,7 @@ class _MqttSource(streamsx.spl.op.Source):
     
     def __init__(self, topology, schema, spl_params, name=None):
         kind="com.ibm.streamsx.mqtt::MQTTSource"
-        schemas = schema if isinstance(schema, list) else [schema]
+        schemas = schema
         super(_MqttSource, self).__init__(topology, kind, schemas, spl_params, name)
 
 
