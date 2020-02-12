@@ -79,6 +79,86 @@ class TestParams(unittest.TestCase):
         with self.assertRaises(ValueError):
             sink.command_timeout_millis = -1
 
+    def test_MQTTSource_schemas(self):
+        s = MQTTSource(server_uri='tcp://server:1833', topics='topic1', schema=CommonSchema.Json, data_attribute_name='ignored')
+        # topology.source() calls our populate()
+        Topology().source(s)
+        self.assertEqual(s._op.params['dataAttributeName'], 'jsonString')
+        
+        s = MQTTSource(server_uri='tcp://server:1833', topics='topic1', schema=CommonSchema.String, data_attribute_name='ignored')
+        Topology().source(s)
+        self.assertEqual(s._op.params['dataAttributeName'], 'string')
+        
+        s = MQTTSource(server_uri='tcp://server:1833', topics='topic1', schema=CommonSchema.Binary, data_attribute_name='ignored')
+        Topology().source(s)
+        self.assertEqual(s._op.params['dataAttributeName'], 'binary')
+        
+        s = MQTTSource(server_uri='tcp://server:1833', topics='topic1', schema=MqttDataTuple)
+        Topology().source(s)
+        self.assertNotIn('dataAttributeName', s._op.params)
+        
+        s = MQTTSource(server_uri='tcp://server:1833', topics='topic1', schema=[MqttDataTuple], data_attribute_name='data')
+        Topology().source(s)
+        self.assertEqual(s._op.params['dataAttributeName'], 'data')
+
+        s = MQTTSource(server_uri='tcp://server:1833', topics='topic1', schema='tuple<rstring data>')
+        Topology().source(s)
+        self.assertNotIn('dataAttributeName', s._op.params)
+
+        s = MQTTSource(server_uri='tcp://server:1833', topics='topic1', schema=StreamSchema('tuple<rstring data>'))
+        Topology().source(s)
+        self.assertNotIn('dataAttributeName', s._op.params)
+
+    def test_MQTTSource_schemas_bad(self):
+        s = MQTTSource(server_uri='tcp://server:1833', topics='topic1', schema=CommonSchema.XML)
+        # topology.source() calls our populate()
+        self.assertRaises(TypeError, Topology().source, s)
+        s = MQTTSource(server_uri='tcp://server:1833', topics='topic1', schema=CommonSchema.Python)
+        self.assertRaises(TypeError, Topology().source, s)
+
+    def test_MQTTSink_schemas(self):
+        topo = Topology()
+        pyObjStream = topo.source(['Hello', 'World!'])
+        
+        jsonStream = pyObjStream.as_json()
+        # for_each() calls our populate()
+        s = MQTTSink(server_uri='tcp://server:1833', topic='t1', data_attribute_name='ignored')
+        jsonStream.for_each(s)
+        self.assertEqual(s._op.params['dataAttributeName'], 'jsonString')
+
+        stringStream = pyObjStream.as_string()
+        s = MQTTSink(server_uri='tcp://server:1833', topic='t1', data_attribute_name='ignored')
+        stringStream.for_each(s)
+        self.assertEqual(s._op.params['dataAttributeName'], 'string')
+
+        binStream = pyObjStream.map (func=lambda s: bytes(s, utf-8), schema=CommonSchema.Binary)
+        s = MQTTSink(server_uri='tcp://server:1833', topic='t1', data_attribute_name='ignored')
+        binStream.for_each(s)
+        self.assertEqual(s._op.params['dataAttributeName'], 'binary')
+        
+        userMsgStream = pyObjStream.map(func=lambda s: {'data':s, 'topic_name':'t1'}, schema=MqttDataTuple)
+        s = MQTTSink(server_uri='tcp://server:1833', topic='t1')
+        userMsgStream.for_each(s)
+        self.assertNotIn('dataAttributeName', s._op.params)
+
+        s = MQTTSink(server_uri='tcp://server:1833', topic='t1', data_attribute_name='data')
+        userMsgStream.for_each(s)
+        self.assertEqual(s._op.params['dataAttributeName'], 'data')
+        
+        splMsgStream = pyObjStream.map(func=lambda s: {'m':s, 'k':s}, schema='tuple<rstring m, int64 k>')
+        s = MQTTSink(server_uri='tcp://server:1833', topic='t1', data_attribute_name='m')
+        splMsgStream.for_each(s)
+        self.assertEqual(s._op.params['dataAttributeName'], 'm')
+
+    def test_MQTTSink_schemas_bad(self):
+        topo = Topology()
+        pyObjStream = topo.source(['Hello', 'World!'])
+        self.assertRaises(TypeError, pyObjStream.for_each, MQTTSink(server_uri='tcp://server:1833', topic='t1'))
+
+        xmlStream = pyObjStream.map (schema=CommonSchema.XML)
+        self.assertRaises(TypeError, xmlStream.for_each, MQTTSink(server_uri='tcp://server:1833', topic='t1'))
+        
+
     def test_options_kwargs_MQTTSink(self):
         print ('\n---------'+str(self))
         sink = MQTTSink(server_uri='tcp://server:1833',
@@ -131,7 +211,7 @@ class TestParams(unittest.TestCase):
         print ('\n---------'+str(self))
         src = MQTTSource(server_uri='tcp://server:1833',
                          topics=['topic1', 'topic2'],
-                         schema=[MqttDataTuple],
+                         schema=MqttDataTuple,
                          data_attribute_name='data',
                          #kwargs
                          vm_arg = ["-Xmx1G"],
@@ -216,7 +296,7 @@ class Test(unittest.TestCase):
         name = 'test_MQTTSource'
         topo = Topology(name)
         streamsx.spl.toolkit.add_toolkit(topo, self.mqtt_toolkit_home)
-        src = MQTTSource(server_uri='tcp://server:1833', topics=['topic1', 'topic2'], schema=[MqttDataTuple])
+        src = MQTTSource(server_uri='tcp://server:1833', topics=['topic1', 'topic2'], schema=MqttDataTuple)
         # simply add all parameters; let' see if it compiles
         src.qos = [1, 2]
         src.message_queue_size = 122

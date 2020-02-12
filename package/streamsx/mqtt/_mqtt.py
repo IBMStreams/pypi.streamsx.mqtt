@@ -519,7 +519,7 @@ class MQTTSink(MQTTComposite, AbstractSink):
             self.qos = options.get('qos')
         if 'retain' in options:
             self.retain = options.get('retain')
-        
+        self._op = None
 
     def create_spl_params(self, topology) -> dict:
         spl_params = MQTTComposite.create_spl_params(self, topology)
@@ -573,17 +573,25 @@ class MQTTSink(MQTTComposite, AbstractSink):
         spl_params = self.create_spl_params(topology)
         #derive 'dataAttributeName' from schema
         schema = stream.oport.schema
-        if schema is CommonSchema.Json:
+        if schema is CommonSchema.Python:
+            spl_params['dataAttributeName'] = '__spl_po'
+            raise TypeError('CommonSchema.Python is not supported by the MQTTSink')
+        elif schema is CommonSchema.XML:
+            spl_params['dataAttributeName'] = 'document'
+            raise TypeError('CommonSchema.XML is not supported by the MQTTSink')
+        elif schema is CommonSchema.Json:
             spl_params['dataAttributeName'] = 'jsonString'
         elif schema is CommonSchema.String:
             spl_params['dataAttributeName'] = 'string'
-            # TODO add more pre-defined schemas
+        elif schema is CommonSchema.Binary:
+            spl_params['dataAttributeName'] = 'binary'
+        # TODO add more pre-defined schemas
         else:
             if self._data_attribute_name:
                 spl_params['dataAttributeName'] = self._data_attribute_name
 
-        op = _MqttSink(stream, spl_params, name)
-        return streamsx.topology.topology.Sink(op)
+        self._op = _MqttSink(stream, spl_params, name)
+        return streamsx.topology.topology.Sink(self._op)
 
 
 class MQTTSource(MQTTComposite, AbstractSource):
@@ -620,6 +628,7 @@ class MQTTSource(MQTTComposite, AbstractSource):
             self.qos = options.get('qos')
         if 'message_queue_size' in options:
             self.message_queue_size = options.get('message_queue_size')
+        self._op = None
         
     @property
     def qos(self):
@@ -706,19 +715,25 @@ class MQTTSource(MQTTComposite, AbstractSource):
         self._check_adjust()
         spl_params = self.create_spl_params(topology)
         #derive 'dataAttributeName' from schema
-        if self._schema is CommonSchema.Json:
+        if self._schema is CommonSchema.Python:
+            spl_params['dataAttributeName'] = '__spl_po'
+            raise TypeError('CommonSchema.Python is not supported by the MQTTSource')
+        elif self._schema is CommonSchema.XML:
+            spl_params['dataAttributeName'] = 'document'
+            raise TypeError('CommonSchema.XML is not supported by the MQTTSource')
+        elif self._schema is CommonSchema.Json:
             spl_params['dataAttributeName'] = 'jsonString'
         elif self._schema is CommonSchema.String:
             spl_params['dataAttributeName'] = 'string'
-            # TODO add more pre-defined schemas
+        elif self._schema is CommonSchema.Binary:
+            spl_params['dataAttributeName'] = 'binary'
+        # TODO add more pre-defined schemas
         else:
             if self._data_attribute_name:
                 spl_params['dataAttributeName'] = self._data_attribute_name
 
-        op = _MqttSource(topology, self._schema, spl_params, name)
-#        if 'qosStr' in op.params:
-#            op.params['qos'] = op.expression( op.params['qosStr'])
-        return op.outputs[0]
+        self._op = _MqttSource(topology, self._schema, spl_params, name)
+        return self._op.outputs[0]
 
 
 class _MqttSource(streamsx.spl.op.Source):
@@ -734,7 +749,8 @@ class _MqttSource(streamsx.spl.op.Source):
     
     def __init__(self, topology, schema, spl_params, name=None):
         kind="com.ibm.streamsx.mqtt::MQTTSource"
-        super(_MqttSource, self).__init__(topology, kind, schema, spl_params, name)
+        schemas = schema
+        super(_MqttSource, self).__init__(topology, kind, schemas, spl_params, name)
 
 
 class _MqttSink(streamsx.spl.op.Sink):
