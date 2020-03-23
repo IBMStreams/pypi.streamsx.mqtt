@@ -1,7 +1,0 @@
-{
-  "password" :  "<token of api-key>",
-  "clientID":   "a:<orgId>:<name of app>",
-  "userID":     "<api-key>",
-  "serverURI":  "<orgId>.messaging.internetofthings.ibmcloud.com"
-}
-
